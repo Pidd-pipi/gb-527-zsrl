@@ -1,5 +1,7 @@
 export type ConflictType = 'station_capacity' | 'satellite_overlap' | 'band_mismatch' | 'duration_shortfall' | 'slew_buffer';
 export type ResolutionStatus = 'detected' | 'proposed' | 'pending_review' | 'accepted' | 'rejected';
+export type BackfillOutcome = 'success' | 'failed';
+export type BackfillReviewStatus = 'archived' | 'needs_review';
 
 export const CONFLICT_TYPES: ConflictType[] = ['station_capacity', 'satellite_overlap', 'band_mismatch', 'duration_shortfall', 'slew_buffer'];
 
@@ -33,6 +35,37 @@ export interface ConflictEvidence {
   metadata: Record<string, unknown>;
 }
 
+export interface BackfillSummary {
+  count: number;
+  latest_status?: BackfillReviewStatus;
+  abnormal_window_ids: number[];
+}
+
+export interface ContactBackfill {
+  id: number;
+  resolution_id: number;
+  window_id: number;
+  actual_start_at: string;
+  actual_end_at: string;
+  actual_elevation_peak_deg: number;
+  outcome: BackfillOutcome;
+  result_note: string;
+  start_deviation_sec: number;
+  duration_deviation_sec: number;
+  review_status: BackfillReviewStatus;
+  recorded_by: string;
+  created_at: string;
+}
+
+export interface BackfillInput {
+  window_id: number;
+  actual_start_at: string;
+  actual_end_at: string;
+  actual_elevation_peak_deg: number;
+  outcome: BackfillOutcome;
+  result_note: string;
+}
+
 export interface ConflictResolution {
   id: number;
   conflict_key: string;
@@ -46,6 +79,7 @@ export interface ConflictResolution {
   review_note: string;
   version: number;
   resolved_at?: string;
+  backfill: BackfillSummary;
   created_at: string;
   updated_at: string;
 }

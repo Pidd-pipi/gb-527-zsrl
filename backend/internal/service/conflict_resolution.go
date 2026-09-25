@@ -24,12 +24,13 @@ type ConflictResolutionService struct {
 	stations   *repository.GroundStationRepository
 	assets     *repository.SatelliteAssetRepository
 	audit      *AuditService
+	backfills  *ContactBackfillService
 	weights    scheduler.Weights
 }
 
-func NewConflictResolutionService(conflicts *repository.ConflictResolutionRepository, windows *repository.ContactWindowRepository, stations *repository.GroundStationRepository, assets *repository.SatelliteAssetRepository, audit *AuditService, weights config.Weights) *ConflictResolutionService {
+func NewConflictResolutionService(conflicts *repository.ConflictResolutionRepository, windows *repository.ContactWindowRepository, stations *repository.GroundStationRepository, assets *repository.SatelliteAssetRepository, audit *AuditService, backfills *ContactBackfillService, weights config.Weights) *ConflictResolutionService {
 	return &ConflictResolutionService{
-		repository: conflicts, windows: windows, stations: stations, assets: assets, audit: audit,
+		repository: conflicts, windows: windows, stations: stations, assets: assets, audit: audit, backfills: backfills,
 		weights: scheduler.Weights{PriorityLoss: weights.PriorityLoss, MovementDistance: weights.MovementDistance, ContactDuration: weights.ContactDuration, ResourceMargin: weights.ResourceMargin},
 	}
 }
@@ -47,6 +48,9 @@ func (service *ConflictResolutionService) List(page, pageSize int, status, confl
 		}
 		responses = append(responses, response)
 	}
+	if err := service.attachBackfillSummaries(responses); err != nil {
+		return nil, dto.PageMeta{}, err
+	}
 	return responses, pageMeta(page, pageSize, total), nil
 }
 
@@ -55,7 +59,35 @@ func (service *ConflictResolutionService) Get(id uint) (dto.ConflictResolutionRe
 	if err != nil {
 		return dto.ConflictResolutionResponse{}, MapRepositoryError("conflict resolution", err)
 	}
-	return resolutionResponse(resolution)
+	response, err := resolutionResponse(resolution)
+	if err != nil {
+		return dto.ConflictResolutionResponse{}, err
+	}
+	responses := []dto.ConflictResolutionResponse{response}
+	if err := service.attachBackfillSummaries(responses); err != nil {
+		return dto.ConflictResolutionResponse{}, err
+	}
+	return responses[0], nil
+}
+
+func (service *ConflictResolutionService) attachBackfillSummaries(responses []dto.ConflictResolutionResponse) error {
+	if len(responses) == 0 {
+		return nil
+	}
+	ids := make([]uint, 0, len(responses))
+	for _, response := range responses {
+		ids = append(ids, response.ID)
+	}
+	summaries, err := service.backfills.Summaries(ids)
+	if err != nil {
+		return err
+	}
+	for index := range responses {
+		if summary, ok := summaries[responses[index].ID]; ok {
+			responses[index].Backfill = summary
+		}
+	}
+	return nil
 }
 
 func (service *ConflictResolutionService) Detect(request dto.DetectConflictsRequest, actor dto.Actor, requestID string) (dto.DetectionResult, error) {
@@ -99,6 +131,9 @@ func (service *ConflictResolutionService) Detect(request dto.DetectConflictsRequ
 			return dto.DetectionResult{}, err
 		}
 		responses = append(responses, resolution)
+	}
+	if err := service.attachBackfillSummaries(responses); err != nil {
+		return dto.DetectionResult{}, err
 	}
 	if err := service.audit.Record(actor, requestID, "conflicts.scanned", "planning_range", from.UTC().Format(time.RFC3339), map[string]any{"from": from.UTC(), "to": to.UTC(), "window_count": len(windows), "weights": service.weights}, nil, map[string]any{"conflict_count": len(groups)}); err != nil {
 		return dto.DetectionResult{}, err
@@ -266,11 +301,14 @@ func resolutionResponse(resolution model.ConflictResolution) (dto.ConflictResolu
 	response := dto.ConflictResolutionResponse{
 		ID: resolution.ID, ConflictKey: resolution.ConflictKey, ConflictType: resolution.ConflictType, ResolutionStatus: resolution.ResolutionStatus,
 		ResolvedBy: resolution.ResolvedBy, ReviewNote: resolution.ReviewNote, Version: resolution.Version, ResolvedAt: resolution.ResolvedAt,
+		Backfill:  dto.BackfillSummary{AbnormalWindowIDs: []uint{}},
 		CreatedAt: resolution.CreatedAt, UpdatedAt: resolution.UpdatedAt,
 	}
-	if err := json.Unmarshal([]byte(resolution.WindowIDsJSON), &response.WindowIDs); err != nil {
-		return response, Internal("stored window IDs are invalid", err)
+	windowIDs, err := decodeWindowIDs(resolution.WindowIDsJSON)
+	if err != nil {
+		return response, err
 	}
+	response.WindowIDs = windowIDs
 	if err := json.Unmarshal([]byte(resolution.EvidenceJSON), &response.Evidence); err != nil {
 		return response, Internal("stored conflict evidence is invalid", err)
 	}
@@ -285,6 +323,14 @@ func resolutionResponse(resolution model.ConflictResolution) (dto.ConflictResolu
 		response.SelectedAction = &selected
 	}
 	return response, nil
+}
+
+func decodeWindowIDs(encoded string) ([]uint, error) {
+	var windowIDs []uint
+	if err := json.Unmarshal([]byte(encoded), &windowIDs); err != nil {
+		return nil, Internal("stored window IDs are invalid", err)
+	}
+	return windowIDs, nil
 }
 
 func selectSuggestion(encoded, key string) (dto.ResolutionSuggestion, error) {

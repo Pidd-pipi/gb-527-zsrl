@@ -42,6 +42,8 @@ docker compose down -v --remove-orphans
 
 接受建议只会在一个数据库事务内核对所有关联窗口版本并保存 reviewer 的选择，不会自动移动窗口。只有 accepted 记录可以通过导出 API 形成离线规划记录。
 
+接触结束后在 `/conflicts` 对已接受方案登记执行回填：按关联窗口填写实际时段、最大仰角、结果说明和成功状态。开始偏差超过 10 分钟或时长差超过 5 分钟的记录标为 `needs_review`，其余直接 `archived`；同一冲突可追加多条记录，后续补录不改旧结论，冲突列表显示回填次数、最新状态和异常窗口。
+
 ## 技术栈与目录
 
 - 前端：Angular 17 standalone components、Angular Material、RxJS、Angular CLI/esbuild。
@@ -101,6 +103,7 @@ docker compose down -v --remove-orphans
 | POST | `/api/v1/conflicts/:id/submit` | `proposed -> pending_review` |
 | POST | `/api/v1/conflicts/:id/review` | reviewer 接受或拒绝 |
 | GET | `/api/v1/conflicts/:id/export` | accepted 规划记录，不含控制命令 |
+| GET/POST | `/api/v1/conflicts/:id/backfills` | 执行回填列表与登记（仅 accepted，登记限 scheduler/admin） |
 | GET | `/api/v1/audit` | 审计分页列表 |
 
 `/healthz` 表示进程存活，`/readyz` 真实 ping 数据库。
@@ -129,6 +132,16 @@ docker compose down -v --remove-orphans
 - 前端类型/hook/store：`types/conflict.ts`、`hooks/use-conflict-detection.ts`，冲突列表由 API 状态持有，不复制枚举。
 - 前端共享组件：`ResolutionComparePanel`、`WindowStatusBadge`。
 - 前端页面：`conflicts.page.ts` 与 `audit.page.ts`。
+
+### BackfillReviewStatus
+
+值为 `archived | needs_review`；回填成功状态 `BackfillOutcome = success | failed`。
+
+- 数据库：`contact_backfills.review_status`、`contact_backfills.outcome`。
+- 后端常量与阈值（开始偏差 600 秒、时长差 300 秒）：`backend/internal/constants/conflict.go`。
+- 后端 model/DTO/repository/service/handler：分别位于 `model/contact_backfill.go`、`dto/contact_backfill.go`、`repository/contact_backfill.go`、`service/contact_backfill.go`、`handler/contact_backfill.go`，路由挂在 `router/conflict_resolution.go`。
+- 前端类型/API：`frontend/src/app/types/conflict.ts`、`frontend/src/app/api/api.service.ts`。
+- 前端展示：冲突列表摘要与已接受详情的回填区（`conflicts.page.ts`），状态徽章复用 `WindowStatusBadge`。
 
 ## 算法假设
 

@@ -36,3 +36,25 @@ func CanTransitionResolution(from, to string) bool {
 		return false
 	}
 }
+
+const (
+	BackfillOutcomeSuccess = "success"
+	BackfillOutcomeFailed  = "failed"
+)
+
+const (
+	BackfillStatusArchived    = "archived"
+	BackfillStatusNeedsReview = "needs_review"
+)
+
+const (
+	BackfillStartDeviationLimitSec    = 600
+	BackfillDurationDeviationLimitSec = 300
+)
+
+func ClassifyBackfill(startDeviationSec, durationDeviationSec int) string {
+	if startDeviationSec > BackfillStartDeviationLimitSec || durationDeviationSec > BackfillDurationDeviationLimitSec {
+		return BackfillStatusNeedsReview
+	}
+	return BackfillStatusArchived
+}

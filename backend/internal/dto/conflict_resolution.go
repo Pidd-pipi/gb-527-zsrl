@@ -57,6 +57,7 @@ type ConflictResolutionResponse struct {
 	ReviewNote       string                 `json:"review_note"`
 	Version          uint                   `json:"version"`
 	ResolvedAt       *time.Time             `json:"resolved_at,omitempty"`
+	Backfill         BackfillSummary        `json:"backfill"`
 	CreatedAt        time.Time              `json:"created_at"`
 	UpdatedAt        time.Time              `json:"updated_at"`
 }

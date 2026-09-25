@@ -20,6 +20,7 @@ type handlers struct {
 	satellites *handler.SatelliteAssetHandler
 	windows    *handler.ContactWindowHandler
 	conflicts  *handler.ConflictResolutionHandler
+	backfills  *handler.ContactBackfillHandler
 	auth       *service.AuthService
 }
 
@@ -37,7 +38,7 @@ func New(db *gorm.DB, cfg config.Config) *gin.Engine {
 	registerStationRoutes(protected, handlers.stations)
 	registerSatelliteRoutes(protected, handlers.satellites)
 	registerWindowRoutes(protected, handlers.windows)
-	registerConflictRoutes(protected, handlers.conflicts)
+	registerConflictRoutes(protected, handlers.conflicts, handlers.backfills)
 	protected.GET("/audit", middleware.RBAC(constants.RoleReviewer, constants.RoleAdmin), handlers.system.Audit)
 	engine.NoRoute(func(context *gin.Context) {
 		context.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "route_not_found", "message": "route was not found"}, "request_id": context.GetString("request_id")})
@@ -50,16 +51,18 @@ func wire(db *gorm.DB, cfg config.Config) handlers {
 	assetRepository := repository.NewSatelliteAssetRepository(db)
 	windowRepository := repository.NewContactWindowRepository(db)
 	conflictRepository := repository.NewConflictResolutionRepository(db)
+	backfillRepository := repository.NewContactBackfillRepository(db)
 	systemRepository := repository.NewSystemRepository(db)
 	auditService := service.NewAuditService(systemRepository)
 	authService := service.NewAuthService(systemRepository, cfg.JWTSecret, cfg.JWTTTL)
 	stationService := service.NewGroundStationService(stationRepository, auditService)
 	assetService := service.NewSatelliteAssetService(assetRepository, auditService)
 	windowService := service.NewContactWindowService(windowRepository, stationRepository, assetRepository, auditService)
-	conflictService := service.NewConflictResolutionService(conflictRepository, windowRepository, stationRepository, assetRepository, auditService, cfg.Weights)
+	backfillService := service.NewContactBackfillService(backfillRepository, conflictRepository, windowRepository, auditService)
+	conflictService := service.NewConflictResolutionService(conflictRepository, windowRepository, stationRepository, assetRepository, auditService, backfillService, cfg.Weights)
 	return handlers{
 		system: handler.NewSystemHandler(authService, auditService, db), stations: handler.NewGroundStationHandler(stationService),
 		satellites: handler.NewSatelliteAssetHandler(assetService), windows: handler.NewContactWindowHandler(windowService),
-		conflicts: handler.NewConflictResolutionHandler(conflictService), auth: authService,
+		conflicts: handler.NewConflictResolutionHandler(conflictService), backfills: handler.NewContactBackfillHandler(backfillService), auth: authService,
 	}
 }
