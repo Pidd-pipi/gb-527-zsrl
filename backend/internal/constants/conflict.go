@@ -36,3 +36,32 @@ func CanTransitionResolution(from, to string) bool {
 		return false
 	}
 }
+
+const (
+	BackfillOutcomeSuccess = "success"
+	BackfillOutcomePartial = "partial"
+	BackfillOutcomeFailed  = "failed"
+)
+
+var BackfillOutcomes = []string{
+	BackfillOutcomeSuccess,
+	BackfillOutcomePartial,
+	BackfillOutcomeFailed,
+}
+
+const (
+	BackfillReviewArchived    = "archived"
+	BackfillReviewNeedsReview = "needs_review"
+)
+
+const (
+	BackfillStartDeviationLimitSec    = 600
+	BackfillDurationDeviationLimitSec = 300
+)
+
+func BackfillReviewStatus(startDeviationSec, durationDeviationSec int) string {
+	if startDeviationSec > BackfillStartDeviationLimitSec || durationDeviationSec > BackfillDurationDeviationLimitSec {
+		return BackfillReviewNeedsReview
+	}
+	return BackfillReviewArchived
+}

@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { ApiEnvelope, LoginResponse, PageEnvelope } from '../types/api';
 import { AuditEvent, GroundStation, SatelliteAsset } from '../types/resources';
 import { ContactWindow, ContactWindowInput } from '../types/window';
-import { ConflictResolution, DetectionResult } from '../types/conflict';
+import { ConflictResolution, ContactBackfill, DetectionResult } from '../types/conflict';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -78,6 +78,14 @@ export class ApiService {
       action_key: actionKey,
       review_note: reviewNote,
     });
+  }
+
+  backfills(conflictId: number): Observable<ApiEnvelope<ContactBackfill[]>> {
+    return this.http.get<ApiEnvelope<ContactBackfill[]>>(`${this.root}/conflicts/${conflictId}/backfills`);
+  }
+
+  createBackfill(conflictId: number, input: Record<string, unknown>): Observable<ApiEnvelope<ContactBackfill>> {
+    return this.http.post<ApiEnvelope<ContactBackfill>>(`${this.root}/conflicts/${conflictId}/backfills`, input);
   }
 
   audit(params: Record<string, string | number> = {}): Observable<PageEnvelope<AuditEvent>> {

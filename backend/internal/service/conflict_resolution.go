@@ -23,13 +23,14 @@ type ConflictResolutionService struct {
 	windows    *repository.ContactWindowRepository
 	stations   *repository.GroundStationRepository
 	assets     *repository.SatelliteAssetRepository
+	backfills  *repository.ContactBackfillRepository
 	audit      *AuditService
 	weights    scheduler.Weights
 }
 
-func NewConflictResolutionService(conflicts *repository.ConflictResolutionRepository, windows *repository.ContactWindowRepository, stations *repository.GroundStationRepository, assets *repository.SatelliteAssetRepository, audit *AuditService, weights config.Weights) *ConflictResolutionService {
+func NewConflictResolutionService(conflicts *repository.ConflictResolutionRepository, windows *repository.ContactWindowRepository, stations *repository.GroundStationRepository, assets *repository.SatelliteAssetRepository, backfills *repository.ContactBackfillRepository, audit *AuditService, weights config.Weights) *ConflictResolutionService {
 	return &ConflictResolutionService{
-		repository: conflicts, windows: windows, stations: stations, assets: assets, audit: audit,
+		repository: conflicts, windows: windows, stations: stations, assets: assets, backfills: backfills, audit: audit,
 		weights: scheduler.Weights{PriorityLoss: weights.PriorityLoss, MovementDistance: weights.MovementDistance, ContactDuration: weights.ContactDuration, ResourceMargin: weights.ResourceMargin},
 	}
 }
@@ -47,6 +48,9 @@ func (service *ConflictResolutionService) List(page, pageSize int, status, confl
 		}
 		responses = append(responses, response)
 	}
+	if err := service.attachBackfillSummaries(responses); err != nil {
+		return nil, dto.PageMeta{}, err
+	}
 	return responses, pageMeta(page, pageSize, total), nil
 }
 
@@ -55,7 +59,34 @@ func (service *ConflictResolutionService) Get(id uint) (dto.ConflictResolutionRe
 	if err != nil {
 		return dto.ConflictResolutionResponse{}, MapRepositoryError("conflict resolution", err)
 	}
-	return resolutionResponse(resolution)
+	response, err := resolutionResponse(resolution)
+	if err != nil {
+		return dto.ConflictResolutionResponse{}, err
+	}
+	responses := []dto.ConflictResolutionResponse{response}
+	if err := service.attachBackfillSummaries(responses); err != nil {
+		return dto.ConflictResolutionResponse{}, err
+	}
+	return responses[0], nil
+}
+
+func (service *ConflictResolutionService) attachBackfillSummaries(responses []dto.ConflictResolutionResponse) error {
+	ids := make([]uint, 0, len(responses))
+	for _, response := range responses {
+		ids = append(ids, response.ID)
+	}
+	records, err := service.backfills.ListByResolutions(ids)
+	if err != nil {
+		return Internal("could not load backfill summaries", err)
+	}
+	grouped := map[uint][]model.ContactBackfill{}
+	for _, record := range records {
+		grouped[record.ResolutionID] = append(grouped[record.ResolutionID], record)
+	}
+	for index := range responses {
+		responses[index].Backfill = summarizeBackfills(grouped[responses[index].ID])
+	}
+	return nil
 }
 
 func (service *ConflictResolutionService) Detect(request dto.DetectConflictsRequest, actor dto.Actor, requestID string) (dto.DetectionResult, error) {
@@ -101,6 +132,9 @@ func (service *ConflictResolutionService) Detect(request dto.DetectConflictsRequ
 		responses = append(responses, resolution)
 	}
 	if err := service.audit.Record(actor, requestID, "conflicts.scanned", "planning_range", from.UTC().Format(time.RFC3339), map[string]any{"from": from.UTC(), "to": to.UTC(), "window_count": len(windows), "weights": service.weights}, nil, map[string]any{"conflict_count": len(groups)}); err != nil {
+		return dto.DetectionResult{}, err
+	}
+	if err := service.attachBackfillSummaries(responses); err != nil {
 		return dto.DetectionResult{}, err
 	}
 	return dto.DetectionResult{RangeFrom: from.UTC(), RangeTo: to.UTC(), WindowCount: len(windows), ConflictCount: len(groups), Resolutions: responses}, nil
@@ -266,6 +300,7 @@ func resolutionResponse(resolution model.ConflictResolution) (dto.ConflictResolu
 	response := dto.ConflictResolutionResponse{
 		ID: resolution.ID, ConflictKey: resolution.ConflictKey, ConflictType: resolution.ConflictType, ResolutionStatus: resolution.ResolutionStatus,
 		ResolvedBy: resolution.ResolvedBy, ReviewNote: resolution.ReviewNote, Version: resolution.Version, ResolvedAt: resolution.ResolvedAt,
+		Backfill:  dto.BackfillSummary{FlaggedWindowIDs: []uint{}},
 		CreatedAt: resolution.CreatedAt, UpdatedAt: resolution.UpdatedAt,
 	}
 	if err := json.Unmarshal([]byte(resolution.WindowIDsJSON), &response.WindowIDs); err != nil {

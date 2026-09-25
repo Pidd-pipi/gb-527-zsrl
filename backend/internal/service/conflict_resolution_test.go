@@ -20,7 +20,7 @@ func TestReviewDetectsChangedWindowAndRejectRemainsAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.GroundStation{}, &model.SatelliteAsset{}, &model.ContactWindow{}, &model.ConflictResolution{}, &model.AuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&model.GroundStation{}, &model.SatelliteAsset{}, &model.ContactWindow{}, &model.ConflictResolution{}, &model.ContactBackfill{}, &model.AuditEvent{}); err != nil {
 		t.Fatal(err)
 	}
 	station := model.GroundStation{StationCode: "TEST-GS", Name: "Test", AntennaCount: 1, SupportedBandsJSON: `["S"]`, StationStatus: "active", Version: 1}
@@ -46,8 +46,9 @@ func TestReviewDetectsChangedWindowAndRejectRemainsAvailable(t *testing.T) {
 	assetRepository := repository.NewSatelliteAssetRepository(db)
 	windowRepository := repository.NewContactWindowRepository(db)
 	conflictRepository := repository.NewConflictResolutionRepository(db)
+	backfillRepository := repository.NewContactBackfillRepository(db)
 	audit := NewAuditService(repository.NewSystemRepository(db))
-	service := NewConflictResolutionService(conflictRepository, windowRepository, stationRepository, assetRepository, audit, config.Weights{PriorityLoss: 4, MovementDistance: .02, ContactDuration: .003, ResourceMargin: 2})
+	service := NewConflictResolutionService(conflictRepository, windowRepository, stationRepository, assetRepository, backfillRepository, audit, config.Weights{PriorityLoss: 4, MovementDistance: .02, ContactDuration: .003, ResourceMargin: 2})
 	actor := dto.Actor{ID: 1, Username: "scheduler", Role: constants.RoleScheduler}
 	detected, err := service.Detect(dto.DetectConflictsRequest{From: base.Add(-time.Minute).Format(time.RFC3339), To: base.Add(time.Hour).Format(time.RFC3339)}, actor, "test-detect")
 	if err != nil {

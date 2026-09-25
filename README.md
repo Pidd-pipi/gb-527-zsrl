@@ -37,10 +37,12 @@ docker compose down -v --remove-orphans
 - `/stations`：地面站容量、天线数、频段、转向缓冲和窗口占用。
 - `/satellites`：规划资产、优先权、最短接触需求和按卫星分组的时间线。
 - `/windows`：UTC 候选窗口筛选、创建、兼容性提交和不可移动锁定。
-- `/conflicts`：冲突扫描、证据、稳定排序建议、提交复核和人工接受/拒绝。
+- `/conflicts`：冲突扫描、证据、稳定排序建议、提交复核、人工接受/拒绝和已接受方案的执行回填。
 - `/audit`：request ID、参数摘要、版本前后差异、算法权重和人工选择。
 
 接受建议只会在一个数据库事务内核对所有关联窗口版本并保存 reviewer 的选择，不会自动移动窗口。只有 accepted 记录可以通过导出 API 形成离线规划记录。
+
+执行回填面向已接受方案：按关联窗口登记实际时段、最大仰角、结果说明和成功状态；开始偏差超过 10 分钟或时长差超过 5 分钟的记录标记为 `needs_review`，正常结果直接 `archived`。回填记录只增不改，同一冲突可多次补录，冲突列表同步显示回填次数、最新状态和异常窗口。
 
 ## 技术栈与目录
 
@@ -97,9 +99,10 @@ docker compose down -v --remove-orphans
 | POST | `/api/v1/windows/:id/submit` | 严格校验资源状态、频段和最短时长 |
 | POST | `/api/v1/windows/:id/lock` | 锁定规划输入；后续移动返回 409 |
 | POST | `/api/v1/conflicts/detect` | 在 UTC 范围运行确定性冲突检测 |
-| GET | `/api/v1/conflicts[/:id]` | 建议、评分和证据 |
+| GET | `/api/v1/conflicts[/:id]` | 建议、评分、证据和回填汇总 |
 | POST | `/api/v1/conflicts/:id/submit` | `proposed -> pending_review` |
 | POST | `/api/v1/conflicts/:id/review` | reviewer 接受或拒绝 |
+| GET/POST | `/api/v1/conflicts/:id/backfills` | 已接受方案的执行回填列表与登记 |
 | GET | `/api/v1/conflicts/:id/export` | accepted 规划记录，不含控制命令 |
 | GET | `/api/v1/audit` | 审计分页列表 |
 
@@ -129,6 +132,15 @@ docker compose down -v --remove-orphans
 - 前端类型/hook/store：`types/conflict.ts`、`hooks/use-conflict-detection.ts`，冲突列表由 API 状态持有，不复制枚举。
 - 前端共享组件：`ResolutionComparePanel`、`WindowStatusBadge`。
 - 前端页面：`conflicts.page.ts` 与 `audit.page.ts`。
+
+### BackfillOutcome 与 BackfillReviewStatus
+
+`BackfillOutcome` 值为 `success | partial | failed`（人工登记的成功状态）；`BackfillReviewStatus` 值为 `archived | needs_review`（系统按偏差推导：开始偏差 > 600 秒或时长差 > 300 秒标为 `needs_review`，否则 `archived`）。
+
+- 数据库：`contact_backfills.outcome`、`contact_backfills.review_status`。
+- 后端常量与阈值：`backend/internal/constants/conflict.go`（`BackfillStartDeviationLimitSec`、`BackfillDurationDeviationLimitSec`）。
+- 后端 model/DTO/repository/service/handler：分别位于同名 `contact_backfill.go` 文件；路由挂在 `router/conflict_resolution.go`。
+- 前端类型：`frontend/src/app/types/conflict.ts`；页面：`conflicts.page.ts`；状态展示复用 `WindowStatusBadge`。
 
 ## 算法假设
 
